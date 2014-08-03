@@ -3,6 +3,7 @@
 import time
 import logging
 import os
+import threading
 
 import RPIO
 import gi
@@ -69,8 +70,14 @@ class NativityPlayer(object):
         self.log.info('player initialized')
 
         #thread and flag to control playing
-        self._play_th = None
-        self._do_play = False
+#        self._play_th = None
+#        self._do_play = threading.Event()
+
+        #event to provoke an LCD update
+        self._upd_evt = threading.Event()
+
+        #timer to provoke LCD updates for playing progress
+        self._upd_timer = None
 
 
     def start(self):
@@ -84,13 +91,27 @@ class NativityPlayer(object):
 
         RPIO.wait_for_interrupts(threaded=True)
 
-        while True:
-            time.sleep(5)
-            print 'update'
+        #main LCD update loop
+        while self._upd_evt.wait():
+            self._upd_evt.clear()
+
+            msg = 'file %s' % self.cur_file
+
+            if self.player.current_state == Gst.State.PLAYING:
+                msg += ' (playing, %f %%)' %\
+                    (self.player.query_position(Gst.Format.PERCENT)[1]/10000.0,)
+                #set a timer to fire the update event again
+                self._upd_timer = threading.Timer(0.5, self._trigger_update)
+                self._upd_timer.start()
+
+            print msg
 
 
     def _input_cb(self, pin, istate):
-        """Callback for GPIO event detection."""
+        """Callback for GPIO event detection.
+        
+        Context: callback thread"""
+
         if istate: #button pressed
             self._in_states[pin] = True
             return
@@ -98,10 +119,25 @@ class NativityPlayer(object):
             self._in_states[pin] = False
 
         if pin == self.pin_play:
-            self.log.info('PLAY')
+            self._handle_play()
 
 
     def _handle_play(self):
         """Handles a play event, starting the current file playing and
-        outputting progress."""
-        pass
+        outputting progress.
+        
+        Context: callback thread"""
+        if self.player.current_state != Gst.State.PLAYING:
+            #not yet playing, so we start
+            self.player.set_state(Gst.State.PLAYING)
+
+            while self.player.current_state != Gst.State.PLAYING):
+                self.log.warning('not playing yet')
+                time.sleep(0.25)
+            self._upd_evt.set()
+        #else: already playing, ignore
+
+
+    def _trigger_update(self):
+        """Triggers an LCD update."""
+        self._upd_evt.set()
