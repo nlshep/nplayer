@@ -4,7 +4,7 @@ import time
 import logging
 import os
 
-from RPi import GPIO
+import RPIO
 import gi
 from gi.repository import GObject, Gst
 gi.require_version('Gst', '1.0')
@@ -68,26 +68,29 @@ class NativityPlayer(object):
         self.player.set_property('uri', 'file://%s'%self.cur_file)
         self.log.info('player initialized')
 
+        #thread and flag to control playing
+        self._play_th = None
+        self._do_play = False
+
 
     def start(self):
         """Starts accepting input, then blocks forever."""
-
-        GPIO.setmode(GPIO.BCM)
-
         #set up pins
         for pin in self._pins:
-            GPIO.setup(pin, GPIO.IN, pull_up_down=GPIO.PUD_DOWN)
-            GPIO.add_event_detect(pin, GPIO.BOTH,
-                bouncetime=self.db_time, callback=self._input_cb)
+            RPIO.add_interrupt_callback(pin, self._input_cb,
+                edge='both', pull_up_down=RPIO.PUD_DOWN,
+                debounce_timeout_ms=self.db_time)
+#                threaded_callback=True, debounce_timeout_ms=self.db_time)
+
+        RPIO.wait_for_interrupts(threaded=True)
 
         while True:
-            time.sleep(10)
+            time.sleep(5)
+            print 'update'
 
 
-    def _input_cb(self, pin):
+    def _input_cb(self, pin, istate):
         """Callback for GPIO event detection."""
-        istate = GPIO.input(pin)
-
         if istate: #button pressed
             self._in_states[pin] = True
             return
@@ -96,3 +99,9 @@ class NativityPlayer(object):
 
         if pin == self.pin_play:
             self.log.info('PLAY')
+
+
+    def _handle_play(self):
+        """Handles a play event, starting the current file playing and
+        outputting progress."""
+        pass
