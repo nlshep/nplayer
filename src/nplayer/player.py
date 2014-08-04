@@ -67,11 +67,8 @@ class NativityPlayer(object):
         #set up file player
         self.player = Gst.ElementFactory.make('playbin', 'player')
         self.player.set_property('uri', 'file://%s'%self.cur_file)
+        self.pl_bus = self.player.get_bus()
         self.log.info('player initialized')
-
-        #thread and flag to control playing
-#        self._play_th = None
-#        self._do_play = threading.Event()
 
         #event to provoke an LCD update
         self._upd_evt = threading.Event()
@@ -87,12 +84,12 @@ class NativityPlayer(object):
             RPIO.add_interrupt_callback(pin, self._input_cb,
                 edge='both', pull_up_down=RPIO.PUD_DOWN,
                 debounce_timeout_ms=self.db_time)
-#                threaded_callback=True, debounce_timeout_ms=self.db_time)
 
         RPIO.wait_for_interrupts(threaded=True)
 
         #main LCD update loop
         while self._upd_evt.wait():
+
             self._upd_evt.clear()
 
             msg = 'file %s' % self.cur_file
@@ -100,11 +97,28 @@ class NativityPlayer(object):
             if self.player.current_state == Gst.State.PLAYING:
                 msg += ' (playing, %f %%)' %\
                     (self.player.query_position(Gst.Format.PERCENT)[1]/10000.0,)
-                #set a timer to fire the update event again
-                self._upd_timer = threading.Timer(0.5, self._trigger_update)
-                self._upd_timer.start()
+
+                #drain out messages from the player bus to see if the stream is
+                #done
+                gmsg = self.pl_bus.pop()
+                while gmsg is not None:
+                    if gmsg.type == Gst.MessageType.EOS:
+                        self.log.debug('got end of stream, resetting')
+                        self.player.set_state(Gst.State.READY)
+                        break
+                    else:
+                        gmsg = self.pl_bus.pop()
+                else:
+                    #still playing, so set the timer to do another update
+                    self._upd_timer = threading.Timer(0.5, self._trigger_update)
+                    self._upd_timer.start()
 
             print msg
+
+
+    def _trigger_update(self):
+        """Triggers an LCD update."""
+        self._upd_evt.set()
 
 
     def _input_cb(self, pin, istate):
@@ -120,24 +134,25 @@ class NativityPlayer(object):
 
         if pin == self.pin_play:
             self._handle_play()
+        elif pin == self.pin_stop:
+            self._handle_stop()
 
 
     def _handle_play(self):
-        """Handles a play event, starting the current file playing and
-        outputting progress.
-        
-        Context: callback thread"""
+        """Handles a play event: starts the current file playing."""
         if self.player.current_state != Gst.State.PLAYING:
             #not yet playing, so we start
             self.player.set_state(Gst.State.PLAYING)
 
-            while self.player.current_state != Gst.State.PLAYING):
+            while self.player.current_state != Gst.State.PLAYING:
                 self.log.warning('not playing yet')
                 time.sleep(0.25)
             self._upd_evt.set()
         #else: already playing, ignore
 
 
-    def _trigger_update(self):
-        """Triggers an LCD update."""
-        self._upd_evt.set()
+    def _handle_stop(self):
+        """Handles a stop event: stops the current file if it's playing."""
+        if self.player.current_state == Gst.State.PLAYING:
+            self.player.set_state(Gst.State.READY)
+            self._upd_evt.set()
