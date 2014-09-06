@@ -43,6 +43,18 @@ class NativityPlayer(object):
             self.pin_sctoggle: False
         }
 
+        #map for pin input handlers based on pin and state
+        self._handler_map = {
+            self.pin_play: { True: self._h_play_r, False: self._h_play_f },
+            self.pin_stop: { True: self._h_stop_r, False: self._h_stop_f },
+            self.pin_rw: { True: self._h_rw_r, False: self._h_rw_f },
+            self.pin_ff: { True: self._h_ff_r, False: self._h_ff_f },
+            self.pin_scene: { True: self._h_scene_r, False: self._h_scene_f },
+            self.pin_sctoggle: {
+                True: self._h_sctoggle_r, False: self._h_sctoggle_f
+            }
+        }
+
         #pre-load list of files
         self.files =\
             [os.path.join(self.libdir, x) for x in os.listdir(self.libdir)]
@@ -128,18 +140,17 @@ class NativityPlayer(object):
 
         if istate: #button pressed
             self._in_states[pin] = True
-            return
         else: #button released
             self._in_states[pin] = False
 
-        if pin == self.pin_play:
-            self._handle_play()
-        elif pin == self.pin_stop:
-            self._handle_stop()
+        self._handler_map[pin][istate]()
 
 
-    def _handle_play(self):
-        """Handles a play event: starts the current file playing."""
+    def _h_play_r(self):
+        pass
+
+    def _h_play_f(self):
+        """Play button released; start playing if not already."""
         if self.player.current_state != Gst.State.PLAYING:
             #not yet playing, so we start
             self.player.set_state(Gst.State.PLAYING)
@@ -151,8 +162,28 @@ class NativityPlayer(object):
         #else: already playing, ignore
 
 
-    def _handle_stop(self):
-        """Handles a stop event: stops the current file if it's playing."""
+    def _h_stop_r(self):
+        pass
+
+    def _h_stop_f(self):
+        """Stop button released, stop playing if currently playing."""
         if self.player.current_state == Gst.State.PLAYING:
             self.player.set_state(Gst.State.READY)
             self._upd_evt.set()
+
+    def _h_rw_r(self):
+        pass
+    def _h_rw_f(self):
+        pass
+    def _h_ff_r(self):
+        pass
+    def _h_ff_f(self):
+        pass
+    def _h_scene_r(self):
+        pass
+    def _h_scene_f(self):
+        pass
+    def _h_sctoggle_r(self):
+        pass
+    def _h_sctoggle_f(self):
+        pass
