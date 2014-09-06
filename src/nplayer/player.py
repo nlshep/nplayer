@@ -150,9 +150,14 @@ class NativityPlayer(object):
         pass
 
     def _h_play_f(self):
-        """Play button released; start playing if not already."""
-        if self.player.current_state != Gst.State.PLAYING:
-            #not yet playing, so we start
+        """Play button released"""
+
+        if True in (self._in_states[self.pin_rw], self._in_states[self.pin_ff]):
+            #either rw or ff are pressed down, so this was a botched attempt
+            #(on the user's part) to switch MP3 file
+            pass
+        elif self.player.current_state != Gst.State.PLAYING:
+            #a pure play button release, and we're not yet playing, so start
             self.player.set_state(Gst.State.PLAYING)
 
             while self.player.current_state != Gst.State.PLAYING:
@@ -172,7 +177,17 @@ class NativityPlayer(object):
             self._upd_evt.set()
 
     def _h_rw_r(self):
-        pass
+        """Rewind button pressed; user may either be trying to rewind or
+        cycle the MP3 to be played."""
+        if self._in_states[self.pin_play]:
+            #play is currently pressed, so this is a request to change the
+            #MP3, so we do nothing yet
+            pass
+        else:
+            #play not pressed, so this is the start of a rewind command
+            pass
+
+
     def _h_rw_f(self):
         pass
     def _h_ff_r(self):
