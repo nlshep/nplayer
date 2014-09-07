@@ -32,6 +32,8 @@ class NativityPlayer(object):
         self.db_time = cfg.getint('inputs', 'db_time')
         self.libdir = cfg.get('fs', 'libdir')
 
+        self.skip_len = cfg.getint('prefs', 'skip_len')
+
         #flags for whether each input is high (True) or low (False), keyed by
         #pin number
         self._in_states = {
@@ -177,10 +179,7 @@ class NativityPlayer(object):
         elif self.player.current_state != Gst.State.PLAYING:
             #a pure play button release, and we're not yet playing, so start
             self.player.set_state(Gst.State.PLAYING)
-
-            while self.player.current_state != Gst.State.PLAYING:
-                self.log.warning('not playing yet')
-                time.sleep(0.25)
+            self._wait_playing()
             self._upd_evt.set()
         #else: already playing, ignore
 
@@ -223,8 +222,13 @@ class NativityPlayer(object):
             self._ign_play = True
         else:
             #a rewind request
-            #TODO
-            pass
+            if self.player.current_state == Gst.State.PLAYING:
+                cur_pos = self.player.query_position(Gst.Format.TIME)[1]
+                new_pos = max(0, cur_pos - self.skip_len*10**9)
+                self.player.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH,
+                    Gst.SeekType.SET, new_pos, Gst.SeekType.NONE, -1)
+                self._wait_playing()
+                self._upd_evt.set()
 
 
     def _h_ff_r(self):
@@ -253,8 +257,13 @@ class NativityPlayer(object):
             self._ign_play = True
         else:
             #a fast-forward request
-            #TODO
-            pass
+            if self.player.current_state == Gst.State.PLAYING:
+                cur_pos = self.player.query_position(Gst.Format.TIME)[1]
+                new_pos = max(0, cur_pos + self.skip_len*10**9)
+                self.player.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH,
+                    Gst.SeekType.SET, new_pos, Gst.SeekType.NONE, -1)
+                self._wait_playing()
+                self._upd_evt.set()
 
 
     def _h_scene_r(self):
@@ -265,3 +274,8 @@ class NativityPlayer(object):
         pass
     def _h_sctoggle_f(self):
         pass
+
+
+    def _wait_playing(self):
+        """Blocks waiting for the player to start playing."""
+        self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
