@@ -55,21 +55,33 @@ class NativityPlayer(object):
             }
         }
 
+        #flag used for MP3 switching to ignore a play button release if we've
+        #just switched MP3s (meaning the play button was pressed down as part
+        #of the switch action, not because the user wants to start playing)
+        self._ign_play = False
+
         #pre-load list of files
         self.files =\
             [os.path.join(self.libdir, x) for x in os.listdir(self.libdir)]
         if not self.files:
             raise Exception('no files in library dir %s' % self.libdir)
+        else:
+            self.files.sort()
 
         if cfg.has_option('fs', 'def_file'):
             def_file = os.path.join(self.libdir, cfg.get('fs', 'def_file'))
             if os.path.isfile(def_file):
                 self.cur_file = def_file
+                self.cur_fileno = self.files.index(def_file)
             else:
                 self.cur_file = self.files[0]
+                self.cur_fileno = 0
         else:
             self.cur_file = self.files[0]
-        self.log.info('chose default file %s', self.cur_file)
+            self.cur_fileno = 0
+
+        self.log.info('chose default file %s (index %d)', self.cur_file,
+            self.cur_fileno)
 
         #set up GStreamer
         GObject.threads_init()
@@ -147,7 +159,9 @@ class NativityPlayer(object):
 
 
     def _h_play_r(self):
+        """Play pressed; nothing to do here."""
         pass
+
 
     def _h_play_f(self):
         """Play button released"""
@@ -156,6 +170,10 @@ class NativityPlayer(object):
             #either rw or ff are pressed down, so this was a botched attempt
             #(on the user's part) to switch MP3 file
             pass
+        elif self._ign_play:
+            #play is masked due to an MP3 switch
+            self._ign_play = False
+            return
         elif self.player.current_state != Gst.State.PLAYING:
             #a pure play button release, and we're not yet playing, so start
             self.player.set_state(Gst.State.PLAYING)
@@ -170,26 +188,45 @@ class NativityPlayer(object):
     def _h_stop_r(self):
         pass
 
+
     def _h_stop_f(self):
         """Stop button released, stop playing if currently playing."""
         if self.player.current_state == Gst.State.PLAYING:
             self.player.set_state(Gst.State.READY)
             self._upd_evt.set()
 
+
     def _h_rw_r(self):
         """Rewind button pressed; user may either be trying to rewind or
         cycle the MP3 to be played."""
         if self._in_states[self.pin_play]:
-            #play is currently pressed, so this is a request to change the
-            #MP3, so we do nothing yet
+            #play is currently pressed, so this will be a request to change the
+            #MP3 (on release), so we do nothing yet
             pass
         else:
             #play not pressed, so this is the start of a rewind command
+            #TODO
             pass
 
 
     def _h_rw_f(self):
-        pass
+        """Rewind button released."""
+        if self._in_states[self.pin_play]:
+            #play is pressed, so this is an MP3 change
+            if self.player.current_state == Gst.State.PLAYING:
+                self.player.set_state(Gst.State.READY)
+
+            self.cur_fileno = (self.cur_fileno - 1) % len(self.files)
+            self.cur_file = self.files[self.cur_fileno]
+            self.player.set_property('uri', 'file://%s'%self.cur_file)
+            self._upd_evt.set()
+            self._ign_play = True
+        else:
+            #a rewind request
+            #TODO
+            pass
+
+
     def _h_ff_r(self):
         pass
     def _h_ff_f(self):
