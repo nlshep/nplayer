@@ -10,6 +10,14 @@ import gi
 from gi.repository import GObject, Gst
 gi.require_version('Gst', '1.0')
 
+#error handling:
+#-errors trying to cancel a timer which isn't started
+#-errors with Gstreamer state transitions
+#-current method in _rw_held/_ff_held of resetting the timer for another round
+#only if the button is still down is not perfect. It is technically possible
+#somebody could hit the button at exactly the right frequency so that the system
+#would think it was down the whole time, but this is incredibly unlikely.
+
 class NativityPlayer(object):
     """Implementation class of the music player."""
 
@@ -32,6 +40,7 @@ class NativityPlayer(object):
         self.db_time = cfg.getint('inputs', 'db_time')
         self.libdir = cfg.get('fs', 'libdir')
 
+        self.skip_hold_time = cfg.getfloat('prefs', 'skip_hold_time')
         self.skip_len = cfg.getint('prefs', 'skip_len')
 
         #flags for whether each input is high (True) or low (False), keyed by
@@ -61,6 +70,16 @@ class NativityPlayer(object):
         #just switched MP3s (meaning the play button was pressed down as part
         #of the switch action, not because the user wants to start playing)
         self._ign_play = False
+
+        #flag used for ignoring rewind/fast-forward events due to button
+        #releases when we've just had a rewind/fast-forward due to that same
+        #button being held down
+        self._ign_rw = False
+        self._ign_ff = False
+
+        #timers for handling rewing/fast-forward button holds
+        self._timer_ff = None
+        self._timer_rw = None
 
         #pre-load list of files
         self.files =\
@@ -194,6 +213,18 @@ class NativityPlayer(object):
             self.player.set_state(Gst.State.READY)
             self._upd_evt.set()
 
+        #also cancel any fast-forward/rewind timers
+        if self._timer_rw is not None:
+            try:
+                self._timer_rw.cancel()
+            except Exception as e:
+                log.debug('error canceling rw timer: %s', e)
+        if self._timer_ff is not None:
+            try:
+                self._timer_ff.cancel()
+            except Exception as e:
+                log.debug('error canceling ff timer: %s', e)
+
 
     def _h_rw_r(self):
         """Rewind button pressed; user may either be trying to rewind or
@@ -204,8 +235,8 @@ class NativityPlayer(object):
             pass
         else:
             #play not pressed, so this is the start of a rewind command
-            #TODO
-            pass
+            self._timer_rw = threading.Timer(self.skip_hold_time, self._rw_held)
+            self._timer_rw.start()
 
 
     def _h_rw_f(self):
@@ -222,13 +253,11 @@ class NativityPlayer(object):
             self._ign_play = True
         else:
             #a rewind request
-            if self.player.current_state == Gst.State.PLAYING:
-                cur_pos = self.player.query_position(Gst.Format.TIME)[1]
-                new_pos = max(0, cur_pos - self.skip_len*10**9)
-                self.player.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH,
-                    Gst.SeekType.SET, new_pos, Gst.SeekType.NONE, -1)
-                self._wait_playing()
-                self._upd_evt.set()
+            self._timer_rw.cancel()
+            if not self._ign_rw:
+                self._skip_backward()
+            else:
+                self._ign_rw = False
 
 
     def _h_ff_r(self):
@@ -239,8 +268,8 @@ class NativityPlayer(object):
             pass
         else:
             #play not pressed, so this is the start of a fast-forward
-            #TODO
-            pass
+            self._timer_ff = threading.Timer(self.skip_hold_time, self._ff_held)
+            self._timer_ff.start()
 
 
     def _h_ff_f(self):
@@ -257,13 +286,11 @@ class NativityPlayer(object):
             self._ign_play = True
         else:
             #a fast-forward request
-            if self.player.current_state == Gst.State.PLAYING:
-                cur_pos = self.player.query_position(Gst.Format.TIME)[1]
-                new_pos = max(0, cur_pos + self.skip_len*10**9)
-                self.player.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH,
-                    Gst.SeekType.SET, new_pos, Gst.SeekType.NONE, -1)
-                self._wait_playing()
-                self._upd_evt.set()
+            self._timer_ff.cancel()
+            if not self._ign_ff:
+                self._skip_forward()
+            else:
+                self._ign_ff = False
 
 
     def _h_scene_r(self):
@@ -279,3 +306,48 @@ class NativityPlayer(object):
     def _wait_playing(self):
         """Blocks waiting for the player to start playing."""
         self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
+
+
+    def _skip_forward(self):
+        """Skips the playing track forward by the configured skip length."""
+        if self.player.current_state == Gst.State.PLAYING:
+            cur_pos = self.player.query_position(Gst.Format.TIME)[1]
+            new_pos = max(0, cur_pos + self.skip_len*10**9)
+            self.player.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH,
+                Gst.SeekType.SET, new_pos, Gst.SeekType.NONE, -1)
+            self._wait_playing()
+            self._upd_evt.set()
+
+
+    def _skip_backward(self):
+        """Skips the playing track backward by the configured skip length."""
+        if self.player.current_state == Gst.State.PLAYING:
+            cur_pos = self.player.query_position(Gst.Format.TIME)[1]
+            new_pos = max(0, cur_pos - self.skip_len*10**9)
+            self.player.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH,
+                Gst.SeekType.SET, new_pos, Gst.SeekType.NONE, -1)
+            self._wait_playing()
+            self._upd_evt.set()
+
+
+    def _rw_held(self):
+        """Handles the rewind button being held down."""
+        self.log.info('rewind held')
+        self._ign_rw = True
+        self._skip_backward()
+
+        if self._in_states[self.pin_rw]:
+            #continue with another timer if the button is still down
+            self._timer_rw = threading.Timer(self.skip_hold_time, self._rw_held)
+            self._timer_rw.start()
+
+
+    def _ff_held(self):
+        """Handles the fast-forward button being help down."""
+        self.log.info('fast-forward held')
+        self._ign_ff = True
+        self._skip_forward()
+
+        if self._in_states[self.pin_ff]:
+            self._timer_ff = threading.Timer(self.skip_hold_time, self._ff_held)
+            self._timer_ff.start()
