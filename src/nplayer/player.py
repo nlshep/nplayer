@@ -108,6 +108,10 @@ class NativityPlayer(object):
             self.cur_file = self.files[0]
             self.cur_fileno = 0
 
+        #length of current file, in nanoseconds; due to how Gstreamer works,
+        #we can't obtain this info until the file has been loaded by Gstreamer
+        self.cur_filelen = 0
+
         self.log.info('chose default file %s (index %d)', self.cur_file,
             self.cur_fileno)
 
@@ -153,8 +157,12 @@ class NativityPlayer(object):
             msg = 'file %s' % self.cur_file
 
             if self.player.current_state == Gst.State.PLAYING:
-                msg += ' (playing, %f %%)' %\
-                    (self.player.query_position(Gst.Format.PERCENT)[1]/10000.0,)
+                cur_pos = self.player.query_position(Gst.Format.TIME)[1]
+                (cmins, csecs, cnsecs) = self._get_time(cur_pos)
+                (dmins, dsecs, dnsecs) = self._get_time(self.cur_filelen)
+                pct = float(cur_pos) / float(self.cur_filelen)
+                msg += ' (playing, %d:%.2d/%d:%.2d (%.2f %%))' %\
+                    (cmins, csecs, dmins, dsecs, pct)
 
                 #drain out messages from the player bus to see if the stream is
                 #done
@@ -210,9 +218,7 @@ class NativityPlayer(object):
             return
         elif self.player.current_state != Gst.State.PLAYING:
             #a pure play button release, and we're not yet playing, so start
-            self.player.set_state(Gst.State.PLAYING)
-            self._wait_playing()
-            self._upd_evt.set()
+            self._play()
         #else: already playing, ignore
 
 
@@ -326,15 +332,21 @@ class NativityPlayer(object):
                 if now - self._scp_times[0] <= float(self.scp_span):
                     #hits occurred within necessary timespan
                     if self.player.current_state != Gst.State.PLAYING:
-                        self.player.set_state(Gst.State.PLAYING)
-                        self._wait_playing()
-                        self._upd_evt.set()
+                        self._play()
 
                     self._scp_times = []
                 else:
                     #first hit was too old
                     self._scp_times.pop(0)
             #else: not enough hits yet
+
+
+    def _play(self):
+        """Begins playing the current file."""
+        self.player.set_state(Gst.State.PLAYING)
+        self._wait_playing()
+        self.cur_filelen = self.player.query_duration(Gst.Format.TIME)[1]
+        self._upd_evt.set()
 
 
     def _wait_playing(self):
@@ -385,3 +397,16 @@ class NativityPlayer(object):
         if self._in_states[self.pin_ff]:
             self._timer_ff = threading.Timer(self.skip_hold_time, self._ff_held)
             self._timer_ff.start()
+
+
+    @staticmethod
+    def _get_time(nsecs):
+        """Converts a number of nanoseconds into a tuple of (int) minutes, (int)
+        seconds, and nanoseconds."""
+
+        secs = int(nsecs / 10**9)
+        lsecs = secs % 60
+        mins = int((secs - lsecs) / 60)
+        nsecs = nsecs % 10**9
+
+        return (mins, lsecs, nsecs)
