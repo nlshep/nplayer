@@ -228,9 +228,35 @@ class NativityPlayer(object):
 
 
     def _h_ff_r(self):
-        pass
+        """Fast-forward button pressed; may be start of either fast-forward or
+        MP3 cycle."""
+        if self._in_states[self.pin_play]:
+            #play is pressed, so MP3 cycle is starting
+            pass
+        else:
+            #play not pressed, so this is the start of a fast-forward
+            #TODO
+            pass
+
+
     def _h_ff_f(self):
-        pass
+        """Fast-forward button released."""
+        if self._in_states[self.pin_play]:
+            #play is pressed, so this is an MP3 change
+            if self.player.current_state == Gst.State.PLAYING:
+                self.player.set_state(Gst.State.READY)
+
+            self.cur_fileno = (self.cur_fileno + 1) % len(self.files)
+            self.cur_file = self.files[self.cur_fileno]
+            self.player.set_property('uri', 'file://%s'%self.cur_file)
+            self._upd_evt.set()
+            self._ign_play = True
+        else:
+            #a fast-forward request
+            #TODO
+            pass
+
+
     def _h_scene_r(self):
         pass
     def _h_scene_f(self):
