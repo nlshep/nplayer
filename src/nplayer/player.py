@@ -27,21 +27,28 @@ class NativityPlayer(object):
 
         self.log = logging.getLogger('nplayer')
 
-        #load up confguration
+        ## load up confguration
+
+        #pins which are handled by asynchronous callbacks
         self.pin_play = cfg.getint('inputs', 'pin_play')
         self.pin_stop = cfg.getint('inputs', 'pin_stop')
         self.pin_rw = cfg.getint('inputs', 'pin_rw')
         self.pin_ff = cfg.getint('inputs', 'pin_ff')
         self.pin_scene = cfg.getint('inputs', 'pin_scene')
-        self.pin_sctoggle = cfg.getint('inputs', 'pin_scene_toggle')
         self._pins = (self.pin_play, self.pin_stop, self.pin_rw, self.pin_ff,
-            self.pin_scene, self.pin_sctoggle)
+            self.pin_scene)
+
+        #scene toggle pin is different; we don't care when it changes; we only
+        #need to check its state at certain times
+        self.pin_sctoggle = cfg.getint('inputs', 'pin_scene_toggle')
 
         self.db_time = cfg.getint('inputs', 'db_time')
         self.libdir = cfg.get('fs', 'libdir')
 
         self.skip_hold_time = cfg.getfloat('prefs', 'skip_hold_time')
         self.skip_len = cfg.getint('prefs', 'skip_len')
+        self.scp_span = cfg.getint('prefs', 'scp_span')
+        self.scp_hits = cfg.getint('prefs', 'scp_hits')
 
         #flags for whether each input is high (True) or low (False), keyed by
         #pin number
@@ -51,7 +58,6 @@ class NativityPlayer(object):
             self.pin_rw: False,
             self.pin_ff: False,
             self.pin_scene: False,
-            self.pin_sctoggle: False
         }
 
         #map for pin input handlers based on pin and state
@@ -61,9 +67,6 @@ class NativityPlayer(object):
             self.pin_rw: { True: self._h_rw_r, False: self._h_rw_f },
             self.pin_ff: { True: self._h_ff_r, False: self._h_ff_f },
             self.pin_scene: { True: self._h_scene_r, False: self._h_scene_f },
-            self.pin_sctoggle: {
-                True: self._h_sctoggle_r, False: self._h_sctoggle_f
-            }
         }
 
         #flag used for MP3 switching to ignore a play button release if we've
@@ -80,6 +83,10 @@ class NativityPlayer(object):
         #timers for handling rewing/fast-forward button holds
         self._timer_ff = None
         self._timer_rw = None
+
+        #list of times at which the scene button was released, to determine
+        #whether we've receive three presses within the requisite time
+        self._scp_times = []
 
         #pre-load list of files
         self.files =\
@@ -124,12 +131,18 @@ class NativityPlayer(object):
 
     def start(self):
         """Starts accepting input, then blocks forever."""
-        #set up pins
+        ## set up pins
+
+        #async pins
         for pin in self._pins:
             RPIO.add_interrupt_callback(pin, self._input_cb,
                 edge='both', pull_up_down=RPIO.PUD_DOWN,
                 debounce_timeout_ms=self.db_time)
 
+        #scene toggle
+        RPIO.setup(self.pin_sctoggle, RPIO.IN, pull_up_down=RPIO.PUD_DOWN)
+
+        #start handling async events
         RPIO.wait_for_interrupts(threaded=True)
 
         #main LCD update loop
@@ -225,6 +238,9 @@ class NativityPlayer(object):
             except Exception as e:
                 log.debug('error canceling ff timer: %s', e)
 
+        #also throw out saved scene play button press times
+        self._scp_times = []
+
 
     def _h_rw_r(self):
         """Rewind button pressed; user may either be trying to rewind or
@@ -294,13 +310,31 @@ class NativityPlayer(object):
 
 
     def _h_scene_r(self):
+        """Scene play button pressed."""
         pass
+
     def _h_scene_f(self):
-        pass
-    def _h_sctoggle_r(self):
-        pass
-    def _h_sctoggle_f(self):
-        pass
+        """Scene play button released."""
+        now = time.time()
+
+        if RPIO.input(self.pin_sctoggle):
+            #scene play button is enabled
+
+            self._scp_times.append(now)
+            if len(self._scp_times) == self.scp_hits:
+                #we have enough hits now
+                if now - self._scp_times[0] <= float(self.scp_span):
+                    #hits occurred within necessary timespan
+                    if self.player.current_state != Gst.State.PLAYING:
+                        self.player.set_state(Gst.State.PLAYING)
+                        self._wait_playing()
+                        self._upd_evt.set()
+
+                    self._scp_times = []
+                else:
+                    #first hit was too old
+                    self._scp_times.pop(0)
+            #else: not enough hits yet
 
 
     def _wait_playing(self):
