@@ -29,6 +29,8 @@ class NativityPlayer(object):
 
         ## load up confguration
 
+        self.invert_logic = cfg.getboolean('inputs', 'invert_logic')
+
         #pins which are handled by asynchronous callbacks
         self.pin_play = cfg.getint('inputs', 'pin_play')
         self.pin_stop = cfg.getint('inputs', 'pin_stop')
@@ -139,12 +141,13 @@ class NativityPlayer(object):
 
         #async pins
         for pin in self._pins:
-            RPIO.add_interrupt_callback(pin, self._input_cb,
-                edge='both', pull_up_down=RPIO.PUD_DOWN,
+            RPIO.add_interrupt_callback(pin, self._input_cb, edge='both',
+                pull_up_down=(RPIO.PUD_UP if self.invert_logic else RPIO.PUD_DOWN),
                 debounce_timeout_ms=self.db_time)
 
         #scene toggle
-        RPIO.setup(self.pin_sctoggle, RPIO.IN, pull_up_down=RPIO.PUD_DOWN)
+        RPIO.setup(self.pin_sctoggle, RPIO.IN,
+            pull_up_down=(RPIO.PUD_UP if self.invert_logic else RPIO.PUD_DOWN))
 
         #start handling async events
         RPIO.wait_for_interrupts(threaded=True)
@@ -192,12 +195,15 @@ class NativityPlayer(object):
         
         Context: callback thread"""
 
-        if istate: #button pressed
-            self._in_states[pin] = True
-        else: #button released
-            self._in_states[pin] = False
+        if self.invert_logic:
+            #inverted logic, button depressed represented by digital 0 (false)
+            newState = not bool(istate)
+        else:
+            #straight logic, button depressed represented by digital 1 (true)
+            newState = bool(istate)
 
-        self._handler_map[pin][istate]()
+        self._in_states[pin] = newState
+        self._handler_map[pin][newState]()
 
 
     def _h_play_r(self):
