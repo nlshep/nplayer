@@ -1,5 +1,6 @@
 #!/bin/sh
 
-export PYTHONPATH=src
+dir=$(cd $(dirname $0); pwd)
+export PYTHONPATH=$dir/src
 
 python2 -m nplayer
