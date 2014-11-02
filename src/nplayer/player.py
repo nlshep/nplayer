@@ -10,6 +10,8 @@ import gi
 from gi.repository import GObject, Gst
 gi.require_version('Gst', '1.0')
 
+from nplayer import nhd_lcd
+
 #error handling:
 #-errors trying to cancel a timer which isn't started
 #-errors with Gstreamer state transitions
@@ -43,6 +45,11 @@ class NativityPlayer(object):
         #scene toggle pin is different; we don't care when it changes; we only
         #need to check its state at certain times
         self.pin_sctoggle = cfg.getint('inputs', 'pin_scene_toggle')
+
+        #LCD color LED backlight pins
+        self.pin_led_red = cfg.getint('lcd', 'pin_red')
+        self.pin_led_green = cfg.getint('lcd', 'pin_green')
+        self.pin_led_blue = cfg.getint('lcd', 'pin_blue')
 
         self.db_time = cfg.getint('inputs', 'db_time')
         self.libdir = cfg.get('fs', 'libdir')
@@ -114,6 +121,8 @@ class NativityPlayer(object):
         #we can't obtain this info until the file has been loaded by Gstreamer
         self.cur_filelen = 0
 
+        self.cur_file_base = os.path.basename(self.cur_file)
+
         self.log.info('chose default file %s (index %d)', self.cur_file,
             self.cur_fileno)
 
@@ -128,6 +137,10 @@ class NativityPlayer(object):
         self.pl_bus = self.player.get_bus()
         self.log.info('player initialized')
 
+        #set up handle to LCD (not actually init'ing LCD yet)
+        self.lcd = nhd_lcd.NHD_LCD(self.pin_led_red, self.pin_led_green,
+            self.pin_led_blue)
+
         #event to provoke an LCD update
         self._upd_evt = threading.Event()
 
@@ -137,6 +150,7 @@ class NativityPlayer(object):
 
     def start(self):
         """Starts accepting input, then blocks forever."""
+
         ## set up pins
 
         #async pins
@@ -149,23 +163,32 @@ class NativityPlayer(object):
         RPIO.setup(self.pin_sctoggle, RPIO.IN,
             pull_up_down=(RPIO.PUD_UP if self.invert_logic else RPIO.PUD_DOWN))
 
+        #set up LCD comms
+        self.lcd.init()
+
         #start handling async events
         RPIO.wait_for_interrupts(threaded=True)
 
         #main LCD update loop
+        self._upd_evt.set() #initial set to get a first printout
         while self._upd_evt.wait():
 
             self._upd_evt.clear()
 
-            msg = 'file %s' % self.cur_file
+            con_msg = 'file %s' % self.cur_file
+            lcd_line1 = self.cur_file_base
+            lcd_line2 = ''
 
             if self.player.current_state == Gst.State.PLAYING:
                 cur_pos = self.player.query_position(Gst.Format.TIME)[1]
                 (cmins, csecs, cnsecs) = self._get_time(cur_pos)
                 (dmins, dsecs, dnsecs) = self._get_time(self.cur_filelen)
                 pct = float(cur_pos) / float(self.cur_filelen)
-                msg += ' (playing, %d:%.2d/%d:%.2d (%.2f %%))' %\
+
+                con_msg += ' (playing, %d:%.2d/%d:%.2d (%.2f %%))' %\
                     (cmins, csecs, dmins, dsecs, pct)
+                lcd_line2 = '%d:%.2d/%d:%.2d (play)' % (cmins, csecs, dmins,
+                    dsecs)
 
                 #drain out messages from the player bus to see if the stream is
                 #done
@@ -181,8 +204,11 @@ class NativityPlayer(object):
                     #still playing, so set the timer to do another update
                     self._upd_timer = threading.Timer(0.5, self._trigger_update)
                     self._upd_timer.start()
+            else:
+                lcd_line2 = 'stopped'
 
-            print msg
+            print con_msg
+            self.lcd.overwrite(lcd_line1, lcd_line2)
 
 
     def _trigger_update(self):
@@ -276,6 +302,7 @@ class NativityPlayer(object):
 
             self.cur_fileno = (self.cur_fileno - 1) % len(self.files)
             self.cur_file = self.files[self.cur_fileno]
+            self.cur_file_base = os.path.basename(self.cur_file)
             self.player.set_property('uri', 'file://%s'%self.cur_file)
             self._upd_evt.set()
             self._ign_play = True
@@ -309,6 +336,7 @@ class NativityPlayer(object):
 
             self.cur_fileno = (self.cur_fileno + 1) % len(self.files)
             self.cur_file = self.files[self.cur_fileno]
+            self.cur_file_base = os.path.basename(self.cur_file)
             self.player.set_property('uri', 'file://%s'%self.cur_file)
             self._upd_evt.set()
             self._ign_play = True
