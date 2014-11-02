@@ -178,6 +178,7 @@ class NativityPlayer(object):
             con_msg = 'file %s' % self.cur_file
             lcd_line1 = self.cur_file_base
             lcd_line2 = ''
+            lcd_leds = (0, 0, 0)
 
             if self.player.current_state == Gst.State.PLAYING:
                 cur_pos = self.player.query_position(Gst.Format.TIME)[1]
@@ -189,6 +190,7 @@ class NativityPlayer(object):
                     (cmins, csecs, dmins, dsecs, pct)
                 lcd_line2 = '%d:%.2d/%d:%.2d (play)' % (cmins, csecs, dmins,
                     dsecs)
+                lcd_leds = (1, 1, 1) #white backlight
 
                 #drain out messages from the player bus to see if the stream is
                 #done
@@ -209,6 +211,7 @@ class NativityPlayer(object):
 
             print con_msg
             self.lcd.overwrite(lcd_line1, lcd_line2)
+            self.lcd.set_backlight(*lcd_leds)
 
 
     def _trigger_update(self):
