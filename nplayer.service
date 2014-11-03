@@ -1,0 +1,9 @@
+[Unit]
+Description=Nativity Player
+
+[Service]
+Type=simple
+ExecStart=/root/proj/player
+
+[Install]
+WantedBy=graphical.target
