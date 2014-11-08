@@ -175,40 +175,46 @@ class NativityPlayer(object):
 
             self._upd_evt.clear()
 
+            #default outputs is to say we're not currently playing
             con_msg = 'file %s' % self.cur_file
             lcd_line1 = self.cur_file_base
-            lcd_line2 = ''
+            lcd_line2 = 'stopped'
             lcd_leds = (0, 0, 0)
 
             if self.player.current_state == Gst.State.PLAYING:
-                cur_pos = self.player.query_position(Gst.Format.TIME)[1]
-                (cmins, csecs, cnsecs) = self._get_time(cur_pos)
-                (dmins, dsecs, dnsecs) = self._get_time(self.cur_filelen)
-                pct = float(cur_pos) / float(self.cur_filelen)
-
-                con_msg += ' (playing, %d:%.2d/%d:%.2d (%.2f %%))' %\
-                    (cmins, csecs, dmins, dsecs, pct)
-                lcd_line2 = '%d:%.2d/%d:%.2d (play)' % (cmins, csecs, dmins,
-                    dsecs)
-                lcd_leds = (1, 1, 1) #white backlight
-
-                #drain out messages from the player bus to see if the stream is
-                #done
+                #player says that it's currently playing, but this does not
+                #conclusively mean that the MP3 hasn't finished playing; we have
+                #to drain out messages from the player bus to see if the stream
+                #is actually done
+                stream_end = False
                 gmsg = self.pl_bus.pop()
-                while gmsg is not None:
+                while gmsg is not None and not stream_end:
                     if gmsg.type == Gst.MessageType.EOS:
                         self.log.debug('got end of stream, resetting')
                         self.player.set_state(Gst.State.READY)
-                        break
+                        stream_end = True
                     else:
                         gmsg = self.pl_bus.pop()
-                else:
-                    #still playing, so set the timer to do another update
+
+                if not stream_end:
+                    #output current position and playing status
+                    cur_pos = self.player.query_position(Gst.Format.TIME)[1]
+                    (cmins, csecs, cnsecs) = self._get_time(cur_pos)
+                    (dmins, dsecs, dnsecs) = self._get_time(self.cur_filelen)
+                    pct = float(cur_pos) / float(self.cur_filelen)
+
+                    con_msg += ' (playing, %d:%.2d/%d:%.2d (%.2f %%))' %\
+                        (cmins, csecs, dmins, dsecs, pct)
+                    lcd_line2 = '%d:%.2d/%d:%.2d (play)' % (cmins, csecs, dmins,
+                        dsecs)
+                    lcd_leds = (1, 1, 1) #white backlight
+
+                    #set the timer to do another output update since we are
+                    #still playing
                     self._upd_timer = threading.Timer(0.5, self._trigger_update)
                     self._upd_timer.start()
-            else:
-                lcd_line2 = 'stopped'
 
+            #output current status
             print con_msg
             self.lcd.overwrite(lcd_line1, lcd_line2)
             self.lcd.set_backlight(*lcd_leds)
