@@ -175,6 +175,10 @@ class NativityPlayer(object):
 
             self._upd_evt.clear()
 
+            #wait out any Gstreamer state transition that may be happening on
+            #the stream
+            self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
+
             #default outputs is to say we're not currently playing
             con_msg = 'file %s' % self.cur_file
             lcd_line1 = self.cur_file_base
