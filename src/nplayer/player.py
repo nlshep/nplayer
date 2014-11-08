@@ -252,7 +252,8 @@ class NativityPlayer(object):
         if True in (self._in_states[self.pin_rw], self._in_states[self.pin_ff]):
             #either rw or ff are pressed down, so this was a botched attempt
             #(on the user's part) to switch MP3 file
-            pass
+            self.log.warning(
+                'botched switch file attempt (must release ff/rw first)')
         elif self._ign_play:
             #play is masked due to an MP3 switch
             self._ign_play = False
