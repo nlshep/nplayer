@@ -39,12 +39,9 @@ class NativityPlayer(object):
         self.pin_rw = cfg.getint('inputs', 'pin_rw')
         self.pin_ff = cfg.getint('inputs', 'pin_ff')
         self.pin_scene = cfg.getint('inputs', 'pin_scene')
-        self._pins = (self.pin_play, self.pin_stop, self.pin_rw, self.pin_ff,
-            self.pin_scene)
-
-        #scene toggle pin is different; we don't care when it changes; we only
-        #need to check its state at certain times
         self.pin_sctoggle = cfg.getint('inputs', 'pin_scene_toggle')
+        self._pins = (self.pin_play, self.pin_stop, self.pin_rw, self.pin_ff,
+            self.pin_scene, self.pin_sctoggle)
 
         #LCD color LED backlight pins
         self.pin_led_red = cfg.getint('lcd', 'pin_red')
@@ -62,6 +59,8 @@ class NativityPlayer(object):
             self._color_int2tuple(cfg.getint('lcd', 'color_stop_auto'))
         self.color_play_err =\
             self._color_int2tuple(cfg.getint('lcd', 'color_play_err'))
+        #the actual color to use when stopped will be set in self.color_stopped
+        #based on the scene toggle switch
 
         self.db_time = cfg.getint('inputs', 'db_time')
         self.libdir = cfg.get('fs', 'libdir')
@@ -88,6 +87,8 @@ class NativityPlayer(object):
             self.pin_rw: { True: self._h_rw_r, False: self._h_rw_f },
             self.pin_ff: { True: self._h_ff_r, False: self._h_ff_f },
             self.pin_scene: { True: self._h_scene_r, False: self._h_scene_f },
+            self.pin_sctoggle:\
+                { True: self._h_sctoggle_r, False: self._h_sctoggle_f },
         }
 
         #flag used for MP3 switching to ignore a play button release if we've
@@ -165,15 +166,20 @@ class NativityPlayer(object):
 
         ## set up pins
 
+        #get the initial scene toggle state and set correct stopped backlight
+        #color
+        sct_state = self._sync_read_pin(self.pin_sctoggle)
+        self._in_states[self.pin_sctoggle] = sct_state
+        if sct_state:
+            self.color_stopped = self.color_stop_auto
+        else:
+            self.color_stopped = self.color_stop_manu
+
         #async pins
         for pin in self._pins:
             RPIO.add_interrupt_callback(pin, self._input_cb, edge='both',
                 pull_up_down=(RPIO.PUD_UP if self.invert_logic else RPIO.PUD_DOWN),
                 debounce_timeout_ms=self.db_time)
-
-        #scene toggle
-        RPIO.setup(self.pin_sctoggle, RPIO.IN,
-            pull_up_down=(RPIO.PUD_UP if self.invert_logic else RPIO.PUD_DOWN))
 
         #set up LCD comms
         self.lcd.init()
@@ -195,6 +201,7 @@ class NativityPlayer(object):
             con_msg = 'file %s' % self.cur_file
             lcd_line1 = self.cur_file_base
             lcd_line2 = 'stopped'
+            lcd_leds = self.color_stopped
 
             if self.player.current_state == Gst.State.PLAYING:
                 #player says that it's currently playing, but this does not
@@ -395,7 +402,7 @@ class NativityPlayer(object):
         """Scene play button released."""
         now = time.time()
 
-        if RPIO.input(self.pin_sctoggle):
+        if self._in_states[pin]:
             #scene play button is enabled
 
             self._scp_times.append(now)
@@ -411,6 +418,19 @@ class NativityPlayer(object):
                     #first hit was too old
                     self._scp_times.pop(0)
             #else: not enough hits yet
+
+
+    def _h_sctoggle_r(self):
+        """Scene toggle enabled (going into automatic mode)."""
+        #set the color to be used when playing is stopped
+        self.color_stopped = self.color_stop_auto
+        self._upd_evt.set()
+
+
+    def _h_sctoggle_f(self):
+        """Scene toggle disabled (going into manual mode)."""
+        self.color_stopped = self.color_stop_manu
+        self._upd_evt.set()
 
 
     def _play(self):
@@ -464,6 +484,17 @@ class NativityPlayer(object):
         if self._in_states[self.pin_ff]:
             self._timer_ff = threading.Timer(self.skip_hold_time, self._ff_held)
             self._timer_ff.start()
+
+
+    def _sync_read_pin(self, pin):
+        """Synchronously reads the state of the given pin, taking the logic
+        inversion setting into account."""
+        RPIO.setup(pin, RPIO.IN, 
+            pull_up_down=(RPIO.PUD_UP if self.invert_logic else RPIO.PUD_DOWN))
+        val = bool(RPIO.input(pin))
+        if self.invert_logic:
+            val = not val
+        return val
 
 
     @staticmethod
