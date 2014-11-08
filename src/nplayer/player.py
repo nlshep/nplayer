@@ -186,15 +186,23 @@ class NativityPlayer(object):
                 #conclusively mean that the MP3 hasn't finished playing; we have
                 #to drain out messages from the player bus to see if the stream
                 #is actually done
+
+                #handle any insteresting messages
                 stream_end = False
                 gmsg = self.pl_bus.pop()
                 while gmsg is not None and not stream_end:
                     if gmsg.type == Gst.MessageType.EOS:
+                        #finished playing
                         self.log.debug('got end of stream, resetting')
                         self.player.set_state(Gst.State.READY)
+                        self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
                         stream_end = True
-                    else:
-                        gmsg = self.pl_bus.pop()
+                    elif gmsg.type == Gst.MessageType.DURATION_CHANGED:
+                        self.log.debug('stream duration changed')
+                        self.cur_filelen =\
+                            self.player.query_duration(Gst.Format.TIME)[1]
+
+                    gmsg = self.pl_bus.pop()
 
                 if not stream_end:
                     #output current position and playing status
@@ -272,6 +280,7 @@ class NativityPlayer(object):
         """Stop button released, stop playing if currently playing."""
         if self.player.current_state == Gst.State.PLAYING:
             self.player.set_state(Gst.State.READY)
+            self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
             self._upd_evt.set()
 
         #also cancel any fast-forward/rewind timers
@@ -309,6 +318,7 @@ class NativityPlayer(object):
             #play is pressed, so this is an MP3 change
             if self.player.current_state == Gst.State.PLAYING:
                 self.player.set_state(Gst.State.READY)
+                self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
 
             self.cur_fileno = (self.cur_fileno - 1) % len(self.files)
             self.cur_file = self.files[self.cur_fileno]
@@ -344,6 +354,7 @@ class NativityPlayer(object):
             #play is pressed, so this is an MP3 change
             if self.player.current_state == Gst.State.PLAYING:
                 self.player.set_state(Gst.State.READY)
+                self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
 
             self.cur_fileno = (self.cur_fileno + 1) % len(self.files)
             self.cur_file = self.files[self.cur_fileno]
@@ -390,14 +401,9 @@ class NativityPlayer(object):
     def _play(self):
         """Begins playing the current file."""
         self.player.set_state(Gst.State.PLAYING)
-        self._wait_playing()
+        self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
         self.cur_filelen = self.player.query_duration(Gst.Format.TIME)[1]
         self._upd_evt.set()
-
-
-    def _wait_playing(self):
-        """Blocks waiting for the player to start playing."""
-        self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
 
 
     def _skip_forward(self):
@@ -407,7 +413,7 @@ class NativityPlayer(object):
             new_pos = max(0, cur_pos + self.skip_len*10**9)
             self.player.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH,
                 Gst.SeekType.SET, new_pos, Gst.SeekType.NONE, -1)
-            self._wait_playing()
+            self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
             self._upd_evt.set()
 
 
@@ -418,7 +424,7 @@ class NativityPlayer(object):
             new_pos = max(0, cur_pos - self.skip_len*10**9)
             self.player.seek(1.0, Gst.Format.TIME, Gst.SeekFlags.FLUSH,
                 Gst.SeekType.SET, new_pos, Gst.SeekType.NONE, -1)
-            self._wait_playing()
+            self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
             self._upd_evt.set()
 
 
