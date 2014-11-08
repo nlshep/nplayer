@@ -51,6 +51,18 @@ class NativityPlayer(object):
         self.pin_led_green = cfg.getint('lcd', 'pin_green')
         self.pin_led_blue = cfg.getint('lcd', 'pin_blue')
 
+        #LCD color LED backlight colors
+        self.color_scene_tap =\
+            self._color_int2tuple(cfg.getint('lcd', 'color_scene_tap'))
+        self.color_playing =\
+            self._color_int2tuple(cfg.getint('lcd', 'color_playing'))
+        self.color_stop_manu =\
+            self._color_int2tuple(cfg.getint('lcd', 'color_stop_manu'))
+        self.color_stop_auto =\
+            self._color_int2tuple(cfg.getint('lcd', 'color_stop_auto'))
+        self.color_play_err =\
+            self._color_int2tuple(cfg.getint('lcd', 'color_play_err'))
+
         self.db_time = cfg.getint('inputs', 'db_time')
         self.libdir = cfg.get('fs', 'libdir')
 
@@ -183,7 +195,6 @@ class NativityPlayer(object):
             con_msg = 'file %s' % self.cur_file
             lcd_line1 = self.cur_file_base
             lcd_line2 = 'stopped'
-            lcd_leds = (0, 0, 0)
 
             if self.player.current_state == Gst.State.PLAYING:
                 #player says that it's currently playing, but this does not
@@ -219,7 +230,7 @@ class NativityPlayer(object):
                         (cmins, csecs, dmins, dsecs, pct)
                     lcd_line2 = '%d:%.2d/%d:%.2d (play)' % (cmins, csecs, dmins,
                         dsecs)
-                    lcd_leds = (1, 1, 1) #white backlight
+                    lcd_leds = self.color_playing
 
                     #set the timer to do another output update since we are
                     #still playing
@@ -466,3 +477,16 @@ class NativityPlayer(object):
         nsecs = nsecs % 10**9
 
         return (mins, lsecs, nsecs)
+
+
+    @staticmethod
+    def _color_int2tuple(bitmask):
+        """Converts an LCD backlight color bitmask (3-bit bitmask indicating
+        whether to enable or disable the red, green, and blue backlight LEDs,
+        respectively [in order from most-significant to least-significant bit])
+        to a tuple used for the LCD control class."""
+        return (
+            (bitmask >> 2) & 1,
+            (bitmask >> 1) & 1,
+            bitmask & 1
+        )
