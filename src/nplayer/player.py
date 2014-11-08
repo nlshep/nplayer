@@ -110,6 +110,10 @@ class NativityPlayer(object):
         #whether we've receive three presses within the requisite time
         self._scp_times = []
 
+        #flag to indicate whether the LCD backlight color is locked, and the
+        #periodic update loop should not change it
+        self._bl_locked = False
+
         #pre-load list of files
         self.files =\
             [os.path.join(self.libdir, x) for x in os.listdir(self.libdir)]
@@ -247,7 +251,8 @@ class NativityPlayer(object):
             #output current status
             print con_msg
             self.lcd.overwrite(lcd_line1, lcd_line2)
-            self.lcd.set_backlight(*lcd_leds)
+            if not self._bl_locked:
+                self.lcd.set_backlight(*lcd_leds)
 
 
     def _trigger_update(self):
@@ -396,13 +401,19 @@ class NativityPlayer(object):
 
     def _h_scene_r(self):
         """Scene play button pressed."""
-        pass
+        self._bl_locked = True
+        self.lcd.set_backlight(*self.color_scene_tap)
 
     def _h_scene_f(self):
         """Scene play button released."""
         now = time.time()
 
-        if self._in_states[pin]:
+        #unlock our backlight color setting and let the update loop determine
+        #what the color should be
+        self._bl_locked = False
+        self._upd_evt.set()
+
+        if self._in_states[self.pin_sctoggle]:
             #scene play button is enabled
 
             self._scp_times.append(now)
