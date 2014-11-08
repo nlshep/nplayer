@@ -243,8 +243,10 @@ class NativityPlayer(object):
                         dsecs)
                     lcd_leds = self.color_playing
 
-                    #set the timer to do another output update since we are
+                    #reset the timer to do another output update since we are
                     #still playing
+                    if self._upd_timer is not None:
+                        self._upd_timer.cancel()
                     self._upd_timer = threading.Timer(0.5, self._trigger_update)
                     self._upd_timer.start()
 
