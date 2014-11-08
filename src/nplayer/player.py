@@ -317,7 +317,8 @@ class NativityPlayer(object):
             self._ign_play = True
         else:
             #a rewind request
-            self._timer_rw.cancel()
+            if self._timer_rw is not None:
+                self._timer_rw.cancel()
             if not self._ign_rw:
                 self._skip_backward()
             else:
@@ -351,7 +352,8 @@ class NativityPlayer(object):
             self._ign_play = True
         else:
             #a fast-forward request
-            self._timer_ff.cancel()
+            if self._timer_ff is not None:
+                self._timer_ff.cancel()
             if not self._ign_ff:
                 self._skip_forward()
             else:
