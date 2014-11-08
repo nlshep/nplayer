@@ -69,6 +69,9 @@ class NativityPlayer(object):
         self.skip_len = cfg.getint('prefs', 'skip_len')
         self.scp_span = cfg.getint('prefs', 'scp_span')
         self.scp_hits = cfg.getint('prefs', 'scp_hits')
+        #convert to nanoseconds to use natively with the duration time that
+        #Gstreamer returns to us
+        self.scp_err_time = cfg.getint('prefs', 'scp_err_time') * 10**9
 
         #flags for whether each input is high (True) or low (False), keyed by
         #pin number
@@ -264,7 +267,7 @@ class NativityPlayer(object):
 
     def _input_cb(self, pin, istate):
         """Callback for GPIO event detection.
-        
+       
         Context: callback thread"""
 
         if self.invert_logic:
@@ -404,7 +407,17 @@ class NativityPlayer(object):
     def _h_scene_r(self):
         """Scene play button pressed."""
         self._bl_locked = True
-        self.lcd.set_backlight(*self.color_scene_tap)
+
+        if self.player.current_state == Gst.State.PLAYING\
+        and self.player.query_position(Gst.Format.TIME)[1] > self.scp_err_time:
+            #still being pressed even after playing should have started and been
+            #noticed at the scene
+            color = self.color_play_err
+        else:
+            color = self.color_scene_tap
+
+        self.lcd.set_backlight(*color)
+
 
     def _h_scene_f(self):
         """Scene play button released."""
@@ -502,7 +515,7 @@ class NativityPlayer(object):
     def _sync_read_pin(self, pin):
         """Synchronously reads the state of the given pin, taking the logic
         inversion setting into account."""
-        RPIO.setup(pin, RPIO.IN, 
+        RPIO.setup(pin, RPIO.IN,
             pull_up_down=(RPIO.PUD_UP if self.invert_logic else RPIO.PUD_DOWN))
         val = bool(RPIO.input(pin))
         if self.invert_logic:
