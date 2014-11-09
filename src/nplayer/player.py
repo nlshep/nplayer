@@ -117,6 +117,10 @@ class NativityPlayer(object):
         #periodic update loop should not change it
         self._bl_locked = False
 
+        #unix timestamp of last time playing completed; used to get time between
+        #scenes
+        self.last_fin = None
+
         #pre-load list of files
         self.files =\
             [os.path.join(self.libdir, x) for x in os.listdir(self.libdir)]
@@ -207,7 +211,13 @@ class NativityPlayer(object):
             #default outputs is to say we're not currently playing
             con_msg = 'file %s' % self.cur_file
             lcd_line1 = self.cur_file_base
-            lcd_line2 = 'stopped'
+            lcd_line2 = 'stop'
+            if self.last_fin is not None:
+                etime = time.time() - self.last_fin
+                (emin, esec) = self._s2tuple(etime)
+                con_msg += ' (%d:%.2d since last stop/finish)' % (emin, esec)
+                lcd_line2 += ' (+%d:%.2d)' % (emin, esec)
+
             lcd_leds = self.color_stopped
 
             if self.player.current_state == Gst.State.PLAYING:
@@ -226,6 +236,7 @@ class NativityPlayer(object):
                         self.player.set_state(Gst.State.READY)
                         self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
                         stream_end = True
+                        self.last_fin = time.time()
                     elif gmsg.type == Gst.MessageType.DURATION_CHANGED:
                         self.log.debug('stream duration changed')
                         self.cur_filelen =\
@@ -236,8 +247,8 @@ class NativityPlayer(object):
                 if not stream_end:
                     #output current position and playing status
                     cur_pos = self.player.query_position(Gst.Format.TIME)[1]
-                    (cmins, csecs, cnsecs) = self._get_time(cur_pos)
-                    (dmins, dsecs, dnsecs) = self._get_time(self.cur_filelen)
+                    (cmins, csecs, cnsecs) = self._ns2tuple(cur_pos)
+                    (dmins, dsecs, dnsecs) = self._ns2tuple(self.cur_filelen)
                     pct = float(cur_pos) / float(self.cur_filelen)
 
                     con_msg += ' (playing, %d:%.2d/%d:%.2d (%.2f %%))' %\
@@ -246,18 +257,17 @@ class NativityPlayer(object):
                         dsecs)
                     lcd_leds = self.color_playing
 
-                    #reset the timer to do another output update since we are
-                    #still playing
-                    if self._upd_timer is not None:
-                        self._upd_timer.cancel()
-                    self._upd_timer = threading.Timer(0.5, self._trigger_update)
-                    self._upd_timer.start()
-
             #output current status
             print con_msg
             self.lcd.overwrite(lcd_line1, lcd_line2)
             if not self._bl_locked:
                 self.lcd.set_backlight(*lcd_leds)
+
+            #reset timer to refresh the display
+            if self._upd_timer is not None:
+                self._upd_timer.cancel()
+            self._upd_timer = threading.Timer(0.5, self._trigger_update)
+            self._upd_timer.start()
 
 
     def _trigger_update(self):
@@ -314,6 +324,7 @@ class NativityPlayer(object):
             self.player.set_state(Gst.State.READY)
             self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
             self._upd_evt.set()
+            self.last_fin = time.time()
 
         #also cancel any fast-forward/rewind timers
         if self._timer_rw is not None:
@@ -524,7 +535,7 @@ class NativityPlayer(object):
 
 
     @staticmethod
-    def _get_time(nsecs):
+    def _ns2tuple(nsecs):
         """Converts a number of nanoseconds into a tuple of (int) minutes, (int)
         seconds, and nanoseconds."""
 
@@ -534,6 +545,18 @@ class NativityPlayer(object):
         nsecs = nsecs % 10**9
 
         return (mins, lsecs, nsecs)
+
+
+    @staticmethod
+    def _s2tuple(secs):
+        """Converts a float number of seconds into a tuple of (int) minutes,
+        (int) seconds."""
+
+        secs = int(secs)
+        lsecs = secs % 60
+        mins = int((secs - lsecs) / 60)
+
+        return (mins, lsecs)
 
 
     @staticmethod
