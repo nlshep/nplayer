@@ -323,8 +323,8 @@ class NativityPlayer(object):
         if self.player.current_state == Gst.State.PLAYING:
             self.player.set_state(Gst.State.READY)
             self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
-            self._upd_evt.set()
             self.last_fin = time.time()
+            self._upd_evt.set()
 
         #also cancel any fast-forward/rewind timers
         if self._timer_rw is not None:
@@ -359,14 +359,8 @@ class NativityPlayer(object):
         """Rewind button released."""
         if self._in_states[self.pin_play]:
             #play is pressed, so this is an MP3 change
-            if self.player.current_state == Gst.State.PLAYING:
-                self.player.set_state(Gst.State.READY)
-                self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
-
-            self.cur_fileno = (self.cur_fileno - 1) % len(self.files)
-            self.cur_file = self.files[self.cur_fileno]
-            self.cur_file_base = os.path.basename(self.cur_file)
-            self.player.set_property('uri', 'file://%s'%self.cur_file)
+            self.last_fin = time.time()
+            self._switch_file(forward=False)
             self._upd_evt.set()
             self._ign_play = True
         else:
@@ -395,14 +389,8 @@ class NativityPlayer(object):
         """Fast-forward button released."""
         if self._in_states[self.pin_play]:
             #play is pressed, so this is an MP3 change
-            if self.player.current_state == Gst.State.PLAYING:
-                self.player.set_state(Gst.State.READY)
-                self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
-
-            self.cur_fileno = (self.cur_fileno + 1) % len(self.files)
-            self.cur_file = self.files[self.cur_fileno]
-            self.cur_file_base = os.path.basename(self.cur_file)
-            self.player.set_property('uri', 'file://%s'%self.cur_file)
+            self.last_fin = time.time()
+            self._switch_file()
             self._upd_evt.set()
             self._ign_play = True
         else:
@@ -532,6 +520,19 @@ class NativityPlayer(object):
         if self.invert_logic:
             val = not val
         return val
+
+
+    def _switch_file(self, forward=True):
+        """Switches to the next MP3 file, either forward or back."""
+        if self.player.current_state == Gst.State.PLAYING:
+            self.player.set_state(Gst.State.READY)
+            self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
+
+        incr = 1 if forward else -1
+        self.cur_fileno = (self.cur_fileno + incr) % len(self.files)
+        self.cur_file = self.files[self.cur_fileno]
+        self.cur_file_base = os.path.basename(self.cur_file)
+        self.player.set_property('uri', 'file://%s'%self.cur_file)
 
 
     @staticmethod
