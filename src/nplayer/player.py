@@ -2,6 +2,7 @@
 
 import time
 import logging
+import sys
 import os
 import threading
 import subprocess
@@ -299,7 +300,7 @@ class NativityPlayer(object):
                     lcd_leds = self.color_playing
 
             #output current status
-            print con_msg
+            print >>sys.stderr, con_msg
             self.lcd.overwrite(lcd_line1, lcd_line2)
             if not self._bl_locked:
                 self.lcd.set_backlight(*lcd_leds)
@@ -334,11 +335,12 @@ class NativityPlayer(object):
 
     def _h_play_r(self):
         """Play pressed; nothing to do here."""
-        pass
+        self.log.debug('play button pressed')
 
 
     def _h_play_f(self):
         """Play button released"""
+        self.log.debug('play button released')
 
         if True in (self._in_states[self.pin_rw], self._in_states[self.pin_ff]):
             #either rw or ff are pressed down, so this was a botched attempt
@@ -347,25 +349,31 @@ class NativityPlayer(object):
                 'botched switch file attempt (must release ff/rw first)')
         elif self._ign_play:
             #play is masked due to an MP3 switch
+            self.log.debug('play masked by mp3 switch operation')
             self._ign_play = False
             return
         elif self.player.current_state != Gst.State.PLAYING:
             #a pure play button release, and we're not yet playing, so start
+            self.log.info('playing by button release')
             self._play()
-        #else: already playing, ignore
+        else:
+            self.log.debug('already playing, ignoring play button release')
 
 
     def _h_stop_r(self):
-        pass
+        self.log.debug('stop button pressed')
 
 
     def _h_stop_f(self):
         """Stop button released, stop playing if currently playing."""
+        self.log.debug('stop button released')
+
         if self.player.current_state == Gst.State.PLAYING:
             self.player.set_state(Gst.State.READY)
             self.player.get_state(timeout=Gst.CLOCK_TIME_NONE)
             self.last_fin = time.time()
             self._upd_evt.set()
+            self.log.info('stopping by button release')
 
         #also cancel any fast-forward/rewind timers
         if self._timer_rw is not None:
@@ -386,20 +394,26 @@ class NativityPlayer(object):
     def _h_rw_r(self):
         """Rewind button pressed; user may either be trying to rewind or
         cycle the MP3 to be played."""
+        self.log.debug('rewind button pressed')
+
         if self._in_states[self.pin_play]:
             #play is currently pressed, so this will be a request to change the
             #MP3 (on release), so we do nothing yet
             pass
         else:
             #play not pressed, so this is the start of a rewind command
+            self.log.debug('starting rewind hold timer')
             self._timer_rw = threading.Timer(self.skip_hold_time, self._rw_held)
             self._timer_rw.start()
 
 
     def _h_rw_f(self):
         """Rewind button released."""
+        self.log.debug('rewind button released')
+
         if self._in_states[self.pin_play]:
             #play is pressed, so this is an MP3 change
+            self.log.info('switching to previous mp3')
             self.last_fin = time.time()
             self._switch_file(forward=False)
             self._upd_evt.set()
@@ -407,29 +421,38 @@ class NativityPlayer(object):
         else:
             #a rewind request
             if self._timer_rw is not None:
+                self.log.debug('rewind hold timer canceled')
                 self._timer_rw.cancel()
             if not self._ign_rw:
+                self.log.info('rewinding by button release')
                 self._skip_backward()
             else:
+                self.log.debug('rewind release actuation masked by hold')
                 self._ign_rw = False
 
 
     def _h_ff_r(self):
         """Fast-forward button pressed; may be start of either fast-forward or
         MP3 cycle."""
+        self.log.debug('fast-forward button pressed')
+
         if self._in_states[self.pin_play]:
             #play is pressed, so MP3 cycle is starting
             pass
         else:
             #play not pressed, so this is the start of a fast-forward
+            self.log.info('starting fast-forward timer')
             self._timer_ff = threading.Timer(self.skip_hold_time, self._ff_held)
             self._timer_ff.start()
 
 
     def _h_ff_f(self):
         """Fast-forward button released."""
+        self.log.debug('fast-forward button released')
+
         if self._in_states[self.pin_play]:
             #play is pressed, so this is an MP3 change
+            self.log.info('switching to next mp3')
             self.last_fin = time.time()
             self._switch_file()
             self._upd_evt.set()
@@ -437,21 +460,26 @@ class NativityPlayer(object):
         else:
             #a fast-forward request
             if self._timer_ff is not None:
+                self.log.debug('fast-forward hold timer canceled')
                 self._timer_ff.cancel()
             if not self._ign_ff:
+                self.log.info('fast-forwarding by button release')
                 self._skip_forward()
             else:
+                self.log.debug('fast-forward release actuation masked by hold')
                 self._ign_ff = False
 
 
     def _h_scene_r(self):
         """Scene play button pressed."""
+        self.log.info('scene button pressed')
         self._bl_locked = True
 
         if self.player.current_state == Gst.State.PLAYING\
         and self.player.query_position(Gst.Format.TIME)[1] > self.scp_err_time:
             #still being pressed even after playing should have started and been
             #noticed at the scene
+            self.log.warning('scene button press exceeds play threshold, scene may not have sound')
             color = self.color_play_err
         else:
             color = self.color_scene_tap
@@ -461,6 +489,8 @@ class NativityPlayer(object):
 
     def _h_scene_f(self):
         """Scene play button released."""
+        self.log.info('scene button released')
+
         now = time.time()
 
         #unlock our backlight color setting and let the update loop determine
@@ -477,17 +507,22 @@ class NativityPlayer(object):
                 if now - self._scp_times[0] <= float(self.scp_span):
                     #hits occurred within necessary timespan
                     if self.player.current_state != Gst.State.PLAYING:
+                        self.log.info('playing by scene button press')
                         self._play()
 
                     self._scp_times = []
                 else:
                     #first hit was too old
+                    self.log.debug('expired old scene button hit')
                     self._scp_times.pop(0)
-            #else: not enough hits yet
+            else:
+                self.log.debug('%d scene button hits left to actuate',
+                    self.scp_hits - len(self._scp_times))
 
 
     def _h_sctoggle_r(self):
         """Scene toggle enabled (going into automatic mode)."""
+        self.log.info('scene toggle enabled (enter auto mode)')
         #set the color to be used when playing is stopped
         self.color_stopped = self.color_stop_auto
         self._upd_evt.set()
@@ -495,6 +530,7 @@ class NativityPlayer(object):
 
     def _h_sctoggle_f(self):
         """Scene toggle disabled (going into manual mode)."""
+        self.log.info('scene toggle disabled (enter manual mode)')
         self.color_stopped = self.color_stop_manu
         self._upd_evt.set()
 
@@ -531,7 +567,7 @@ class NativityPlayer(object):
 
     def _rw_held(self):
         """Handles the rewind button being held down."""
-        self.log.info('rewind held')
+        self.log.info('rewinding by hold')
         self._ign_rw = True
         self._skip_backward()
 
@@ -543,7 +579,7 @@ class NativityPlayer(object):
 
     def _ff_held(self):
         """Handles the fast-forward button being help down."""
-        self.log.info('fast-forward held')
+        self.log.info('fast-forwarding by hold')
         self._ign_ff = True
         self._skip_forward()
 

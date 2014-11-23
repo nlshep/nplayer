@@ -16,7 +16,7 @@ parser.add_argument('-v', '--verbose', action='store_const',
 args = parser.parse_args()
 
 #set up logging
-logging.basicConfig(stream=sys.stdout, level=logging.DEBUG,
+logging.basicConfig(stream=sys.stdout, level=args.loglev,
     format='[%(asctime)s] [%(levelname)3s] %(message)s')
 #log = logging.getLogger('nplayer')
 #log.addHandler(logging.StreamHandler())
