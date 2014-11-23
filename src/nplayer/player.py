@@ -4,6 +4,7 @@ import time
 import logging
 import os
 import threading
+import subprocess
 
 import RPIO
 import gi
@@ -69,6 +70,8 @@ class NativityPlayer(object):
         self.skip_len = cfg.getint('prefs', 'skip_len')
         self.scp_span = cfg.getint('prefs', 'scp_span')
         self.scp_hits = cfg.getint('prefs', 'scp_hits')
+        self.volume = cfg.getint('prefs', 'volume')
+        self.alsa_chan = cfg.get('prefs', 'alsa_chan')
         #convert to nanoseconds to use natively with the duration time that
         #Gstreamer returns to us
         self.scp_err_time = cfg.getint('prefs', 'scp_err_time') * 10**9
@@ -149,6 +152,19 @@ class NativityPlayer(object):
 
         self.log.info('chose default file %s (index %d)', self.cur_file,
             self.cur_fileno)
+
+        #set output channel volume
+        try:
+            subprocess.check_output(
+                ['amixer', 'set', self.alsa_chan, '%s%%' % self.volume],
+                stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            self.log.error(
+                'failed setting volume; amixer returned %d, output was:\n%s',
+                e.returncode, e.output)
+        else:
+            self.log.info('volume for ALSA channel %s set to %d%%',
+                self.alsa_chan, self.volume)
 
         #set up GStreamer
         GObject.threads_init()
