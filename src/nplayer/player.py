@@ -65,6 +65,7 @@ class NativityPlayer(object):
 
         self.db_time = cfg.getint('inputs', 'db_time')
         self.libdir = cfg.get('fs', 'libdir')
+        self._lastf = os.path.expanduser(cfg.get('fs', 'lastf_path'))
 
         self.skip_hold_time = cfg.getfloat('prefs', 'skip_hold_time')
         self.skip_len = cfg.getint('prefs', 'skip_len')
@@ -132,15 +133,35 @@ class NativityPlayer(object):
         else:
             self.files.sort()
 
-        if cfg.has_option('fs', 'def_file'):
-            def_file = os.path.join(self.libdir, cfg.get('fs', 'def_file'))
-            if os.path.isfile(def_file):
-                self.cur_file = def_file
-                self.cur_fileno = self.files.index(def_file)
-            else:
-                self.cur_file = self.files[0]
-                self.cur_fileno = 0
-        else:
+        #determine which file we'll start on; order of preference:
+        #-file specified by ~/.nplayer_last
+        #-fs/def_file setting in config file
+        #-the first file in an alphabetical listing of available files
+
+        self.cur_file = None
+
+        if os.path.exists(self._lastf):
+            with open(self._lastf) as lastfh:
+                lastmp3 = lastfh.readline()
+
+            lastmp3 = os.path.join(self.libdir, lastmp3)
+            if os.path.isfile(lastmp3):
+                self.cur_file = lastmp3
+                self.cur_fileno = self.files.index(lastmp3)
+
+        if self.cur_file is None:
+            #last file didn't work, try conf file setting
+            if cfg.has_option('fs', 'def_file'):
+                def_file = os.path.join(self.libdir, cfg.get('fs', 'def_file'))
+                if os.path.isfile(def_file):
+                    self.cur_file = def_file
+                    self.cur_fileno = self.files.index(def_file)
+                else:
+                    self.cur_file = self.files[0]
+                    self.cur_fileno = 0
+
+        if self.cur_file is None:
+            #conf file didn't work either, use the first available
             self.cur_file = self.files[0]
             self.cur_fileno = 0
 
@@ -150,7 +171,11 @@ class NativityPlayer(object):
 
         self.cur_file_base = os.path.basename(self.cur_file)
 
-        self.log.info('chose default file %s (index %d)', self.cur_file,
+        #write back to the last file whichever one we chose
+        with open(self._lastf, 'w') as lastfh:
+            lastfh.write(self.cur_file_base)
+
+        self.log.info('starting with file %s (index %d)', self.cur_file,
             self.cur_fileno)
 
         #set output channel volume
@@ -293,7 +318,7 @@ class NativityPlayer(object):
 
     def _input_cb(self, pin, istate):
         """Callback for GPIO event detection.
-       
+
         Context: callback thread"""
 
         if self.invert_logic:
@@ -549,6 +574,9 @@ class NativityPlayer(object):
         self.cur_file = self.files[self.cur_fileno]
         self.cur_file_base = os.path.basename(self.cur_file)
         self.player.set_property('uri', 'file://%s'%self.cur_file)
+
+        with open(self._lastf, 'w') as lastfh:
+            lastfh.write(self.cur_file_base)
 
 
     @staticmethod

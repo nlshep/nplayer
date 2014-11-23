@@ -11,7 +11,7 @@ parser.add_argument('-c', '--config', help='path to config file',
     default=DEF_CFG)
 parser.add_argument('-v', '--verbose', action='store_const',
     default=logging.INFO, const=logging.DEBUG, dest='loglev')
-parser.add_argument('-l', '--logfile', help='path to log file')
+#parser.add_argument('-l', '--logfile', help='path to log file')
 
 args = parser.parse_args()
 
