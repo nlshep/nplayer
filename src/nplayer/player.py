@@ -515,6 +515,8 @@ class NativityPlayer(object):
                     #first hit was too old
                     self.log.debug('expired old scene button hit')
                     self._scp_times.pop(0)
+                    self.log.debug('%d scene button hits left to actuate',
+                        self.scp_hits - len(self._scp_times))
             else:
                 self.log.debug('%d scene button hits left to actuate',
                     self.scp_hits - len(self._scp_times))
